@@ -1,9 +1,9 @@
 #include "config.h"
-#include <chrono>
 #include <iostream>
 #include <libpq-fe.h>
 #include <map>
 #include <pqxx/pqxx>
+#include <chrono>
 
 /**
  * nn wthin 50
@@ -15,8 +15,6 @@
  */
 int distance = 50;
 int target = 1;
-std::string table1 = "nuclei";
-std::string table2 = "vessel";
 
 class Range {
   public:
@@ -34,8 +32,8 @@ std::string buildQueryMbbSql(int id) {
     char sql[512];
     sprintf(sql,
             "SELECT b.id,ST_3DDistance(a.geom, b.geom) as mindis ,ST_3DMaxDistance(a.geom, b.geom) as maxdis FROM "
-            "%s_box a, %s_box b WHERE a.id <> b.id AND a.id = '%d';",
-            table1.c_str(), table2.c_str(), id);
+            "nuclei_box a, nuclei_box b WHERE a.id <> b.id AND a.id = '%d';",
+            id);
     return std::string(sql);
 }
 
@@ -53,13 +51,12 @@ std::string buildIdList(const std::vector<int>& ids) {
 /**
  * 返回的是当前lod下的distance和hausdorff距离
  */
-std::string buildQueryLodSql(int lod, int id, std::vector<int> ids) {
+std::string buildQueryOriginSql(int id, std::vector<int> ids) {
     char sql[512];
     sprintf(sql,
-            "SELECT b.id, ST_3DDistance(a.geom, b.geom) as dis, "
-            "b.hausdorff, b.phausdorff FROM "
-            "%s_%d a, %s_%d b WHERE a.id <> b.id AND a.id = '%d' AND b.id IN (%s);",
-            table1.c_str(), lod, table2.c_str(), lod, id, buildIdList(ids).c_str());
+            "SELECT b.id, ST_3DDistance(a.geom, b.geom) as dis FROM "
+            "nuclei_100 a, nuclei_100 b WHERE a.id <> b.id AND a.id = '%d' AND b.id IN (%s);",
+            id, buildIdList(ids).c_str());
     return std::string(sql);
 }
 
@@ -67,10 +64,20 @@ std::string buildQueryHausdorffSql(int lod, int id) {
     char sql[512];
     sprintf(sql,
             "SELECT a.hausdorff, a.phausdorff "
-            "FROM %s_%d a "
+            "FROM nuclei_%d a "
             "WHERE a.id = '%d' ",
-            table1.c_str(), lod, id);
+            lod, id);
     return std::string(sql);
+}
+
+// 根据query mbb返回的结果进行更新
+void parseOriginResult(pqxx::result& rows, std::map<int, Range>& candidates) {
+    for (int i = 0; i < rows.size(); i++) {
+        for (int j = 0; j < rows[i].size(); j++) {
+            candidates[rows[i]["id"].as<int>()].mindis = rows[i]["dis"].as<float>();
+            candidates[rows[i]["id"].as<int>()].maxdis = rows[i]["dis"].as<float>();
+        }
+    }
 }
 
 // 根据query mbb返回的结果进行更新
@@ -86,18 +93,6 @@ void parseDistanceResult(pqxx::result& rows, std::map<int, Range>& candidates) {
                 candidates[rows[i]["id"].as<int>()] =
                     Range(rows[i]["mindis"].as<float>(), rows[i]["maxdis"].as<float>());
             }
-        }
-    }
-}
-
-// 根据query lod返回的结果进行更新
-void parseLodDistanceResult(pqxx::result& rows, std::map<int, Range>& candidates, std::pair<float, float> item) {
-    for (int i = 0; i < rows.size(); i++) {
-        for (int j = 0; j < rows[i].size(); j++) {
-            candidates[rows[i]["id"].as<int>()].mindis =
-                rows[i]["dis"].as<float>() - rows[i]["phausdorff"].as<float>() - item.second;
-            candidates[rows[i]["id"].as<int>()].maxdis =
-                rows[i]["dis"].as<float>() + rows[i]["hausdorff"].as<float>() + item.first;
         }
     }
 }
@@ -126,13 +121,12 @@ std::vector<int> mapKeysToVector(const std::map<int, Range>& myMap) {
     return keys;
 }
 
-int main(int argc, char** argv) {
+int main() {
     pqxx::connection c(buildstr);
     pqxx::work w(c);
+
     auto beforeTime = std::chrono::steady_clock::now();
-
     pqxx::result rows = w.exec(buildQueryMbbSql(target));
-
     std::map<int, Range> candidates;
     parseDistanceResult(rows, candidates);
     std::vector<int> result;
@@ -144,23 +138,17 @@ int main(int argc, char** argv) {
     auto afterTime = std::chrono::steady_clock::now();
     double duration_millsecond = std::chrono::duration<double, std::milli>(afterTime - beforeTime).count();
     std::cout << "mbb takes " << duration_millsecond << "ms" << std::endl;
-    for (int lod = 20; lod <= 100; lod += 20) {
-        rows = w.exec(buildQueryHausdorffSql(lod, target));
-        std::pair<float, float> targetHausdorff =
-            std::make_pair(rows[0]["hausdorff"].as<float>(), rows[0]["phausdorff"].as<float>());
-        rows = w.exec(buildQueryLodSql(lod, target, mapKeysToVector(candidates)));
-        parseLodDistanceResult(rows, candidates, targetHausdorff);
-        filterByDistance(candidates, result, distance);
-        if (candidates.empty()) {
-            // std::cout << lod << std::endl;
-            // for (int i = 0; i < result.size(); i++) {
-            //     std::cout << result[i] << std::endl;
-            // }
-            break;
-        }
-    }
+
+    rows = w.exec(buildQueryOriginSql(target, mapKeysToVector(candidates)));
+    parseOriginResult(rows, candidates);
+    filterByDistance(candidates, result, distance);
+    // if (candidates.empty()) {
+    //     for (int i = 0; i < result.size(); i++) {
+    //         std::cout << result[i] << std::endl;
+    //     }
+    // }
     auto afterTime2 = std::chrono::steady_clock::now();
     duration_millsecond = std::chrono::duration<double, std::milli>(afterTime2 - afterTime).count();
-    std::cout << "progresive takes " << duration_millsecond << "ms" << std::endl;
+    std::cout << "lod100 takes " <<duration_millsecond << "ms" << std::endl;
     return 0;
 }
