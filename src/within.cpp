@@ -4,6 +4,7 @@
 #include <libpq-fe.h>
 #include <map>
 #include <pqxx/pqxx>
+#include <unistd.h>
 
 /**
  * nn wthin 50
@@ -16,7 +17,7 @@
 int distance = 50;
 int target = 1;
 std::string table1 = "nuclei";
-std::string table2 = "vessel";
+std::string table2 = "nuclei";
 
 class Range {
   public:
@@ -33,9 +34,9 @@ std::string buildstr = "hostaddr=" + host + " dbname=" + dbname + " user=" + use
 std::string buildQueryMbbSql(int id) {
     char sql[512];
     sprintf(sql,
-            "SELECT b.id,ST_3DDistance(a.geom, b.geom) as mindis ,ST_3DMaxDistance(a.geom, b.geom) as maxdis FROM "
-            "%s_box a, %s_box b WHERE a.id <> b.id AND a.id = '%d';",
-            table1.c_str(), table2.c_str(), id);
+            "SELECT b.id as id FROM %s_box a, %s_box b WHERE a.id <> b.id AND a.id = %d AND ST_3DDWithin(a.geom, "
+            "b.geom, %d);",
+            table1.c_str(), table2.c_str(), id, distance);
     return std::string(sql);
 }
 
@@ -77,15 +78,7 @@ std::string buildQueryHausdorffSql(int lod, int id) {
 void parseDistanceResult(pqxx::result& rows, std::map<int, Range>& candidates) {
     for (int i = 0; i < rows.size(); i++) {
         for (int j = 0; j < rows[i].size(); j++) {
-            if (candidates.count(rows[i]["id"].as<int>())) {
-                candidates[rows[i]["id"].as<int>()].mindis =
-                    std::max(candidates[rows[i]["id"].as<int>()].mindis, rows[i]["mindis"].as<float>());
-                candidates[rows[i]["id"].as<int>()].maxdis =
-                    std::min(candidates[rows[i]["id"].as<int>()].maxdis, rows[i]["maxdis"].as<float>());
-            } else {
-                candidates[rows[i]["id"].as<int>()] =
-                    Range(rows[i]["mindis"].as<float>(), rows[i]["maxdis"].as<float>());
-            }
+            candidates[rows[i]["id"].as<int>()] = Range();
         }
     }
 }
@@ -127,6 +120,16 @@ std::vector<int> mapKeysToVector(const std::map<int, Range>& myMap) {
 }
 
 int main(int argc, char** argv) {
+    int opt;
+    while ((opt = getopt(argc, argv, "t:1:2:")) != -1) {
+        switch (opt) {
+            case 't': target = std::stoi(optarg); break;
+            case '1': table1 = optarg; break;
+            case '2': table2 = optarg; break;
+            default: std::cerr << "Usage: " << argv[0] << " -t <target> -1 <table1> -2 <table2>" << std::endl; return 1;
+        }
+    }
+
     pqxx::connection c(buildstr);
     pqxx::work w(c);
     auto beforeTime = std::chrono::steady_clock::now();
@@ -136,14 +139,14 @@ int main(int argc, char** argv) {
     std::map<int, Range> candidates;
     parseDistanceResult(rows, candidates);
     std::vector<int> result;
-    filterByDistance(candidates, result, distance);
+    // filterByDistance(candidates, result, distance);
     // 当候选集维空的时候，说明已经确定了结果
     if (candidates.empty()) {
         exit(0);
     }
     auto afterTime = std::chrono::steady_clock::now();
     double duration_millsecond = std::chrono::duration<double, std::milli>(afterTime - beforeTime).count();
-    std::cout << "mbb takes " << duration_millsecond << "ms" << std::endl;
+    std::cout << target << " " << duration_millsecond << " ";
     for (int lod = 20; lod <= 100; lod += 20) {
         rows = w.exec(buildQueryHausdorffSql(lod, target));
         std::pair<float, float> targetHausdorff =
@@ -161,6 +164,6 @@ int main(int argc, char** argv) {
     }
     auto afterTime2 = std::chrono::steady_clock::now();
     duration_millsecond = std::chrono::duration<double, std::milli>(afterTime2 - afterTime).count();
-    std::cout << "progresive takes " << duration_millsecond << "ms" << std::endl;
+    std::cout << duration_millsecond << std::endl;
     return 0;
 }

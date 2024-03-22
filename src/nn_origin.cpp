@@ -1,11 +1,14 @@
 #include "config.h"
 #include <algorithm>
+#include <chrono>
 #include <iostream>
 #include <libpq-fe.h>
 #include <map>
 #include <pqxx/pqxx>
 #include <set>
+#include <unistd.h>
 #include <vector>
+
 std::string buildstr = "hostaddr=" + host + " dbname=" + dbname + " user=" + user + " password=" + password;
 
 /**
@@ -14,6 +17,9 @@ std::string buildstr = "hostaddr=" + host + " dbname=" + dbname + " user=" + use
  */
 int target = 3;
 int number = 3;
+std::string table1 = "nuclei";
+std::string table2 = "nuclei";
+int distance = 100;
 
 class Range {
   public:
@@ -21,6 +27,7 @@ class Range {
     float mindis;
     float maxdis;
     Range(){};
+    Range(int id_) : id(id_){};
     Range(int id_, float mindis_, float maxdis_) : id(id_), mindis(mindis_), maxdis(maxdis_) {}
     Range(float mindis_, float maxdis_) : mindis(mindis_), maxdis(maxdis_) {}
 };
@@ -29,11 +36,11 @@ class Range {
  * 找出来前100最小距离最小的
  */
 std::string buildQueryMbbSql(int id) {
-    char sql[512];
+    char sql[2048];
     sprintf(sql,
-            "SELECT b.id,ST_3DDistance(a.geom, b.geom) as mindis ,ST_3DMaxDistance(a.geom, b.geom) as maxdis FROM "
-            "nuclei_box a, nuclei_box b WHERE a.id <> b.id AND a.id = '%d' order by mindis limit 100;",
-            id);
+            "SELECT b.id as id FROM %s_box a, %s_box b WHERE a.id <> b.id AND a.id = %d AND ST_3DDWithin(a.geom, "
+            "b.geom, %d);",
+            table1.c_str(), table2.c_str(), id, distance);
     return std::string(sql);
 }
 
@@ -52,11 +59,11 @@ std::string buildIdList(const std::vector<int>& ids) {
  * 返回的是当前lod下的distance和hausdorff距离
  */
 std::string buildQueryOriginSql(int id, std::vector<int> ids) {
-    char sql[512];
+    char sql[2048];
     sprintf(sql,
             "SELECT b.id, ST_3DDistance(a.geom, b.geom) as dis FROM "
-            "nuclei_100 a, nuclei_100 b WHERE a.id <> b.id AND a.id = '%d' AND b.id IN (%s);",
-            id, buildIdList(ids).c_str());
+            "%s_100 a, %s_100 b WHERE a.id <> b.id AND a.id = '%d' AND b.id IN (%s);",
+            table1.c_str(), table2.c_str(), id, buildIdList(ids).c_str());
     return std::string(sql);
 }
 
@@ -64,22 +71,23 @@ std::string buildQueryOriginSql(int id, std::vector<int> ids) {
 void parseDistanceResult(pqxx::result& rows, std::map<int, Range>& candidates) {
     for (int i = 0; i < rows.size(); i++) {
         for (int j = 0; j < rows[i].size(); j++) {
-            if (candidates.count(rows[i]["id"].as<int>())) {
-                candidates[rows[i]["id"].as<int>()].mindis =
-                    std::max(candidates[rows[i]["id"].as<int>()].mindis, rows[i]["mindis"].as<float>());
-                candidates[rows[i]["id"].as<int>()].maxdis =
-                    std::min(candidates[rows[i]["id"].as<int>()].maxdis, rows[i]["maxdis"].as<float>());
-            } else {
-                candidates[rows[i]["id"].as<int>()] =
-                    Range(rows[i]["mindis"].as<float>(), rows[i]["maxdis"].as<float>());
-            }
-            candidates[rows[i]["id"].as<int>()].id = rows[i]["id"].as<int>();
+            candidates[rows[i]["id"].as<int>()] = Range(rows[i]["id"].as<int>());
         }
     }
 }
 
 // 根据query lod返回的结果进行更新
 void parseLodOriginResult(pqxx::result& rows, std::map<int, Range>& candidates) {
+    for (int i = 0; i < rows.size(); i++) {
+        for (int j = 0; j < rows[i].size(); j++) {
+            candidates[rows[i]["id"].as<int>()].mindis = rows[i]["dis"].as<float>();
+            candidates[rows[i]["id"].as<int>()].maxdis = rows[i]["dis"].as<float>();
+        }
+    }
+}
+
+// 根据query mbb返回的结果进行更新
+void parseOriginResult(pqxx::result& rows, std::map<int, Range>& candidates) {
     for (int i = 0; i < rows.size(); i++) {
         for (int j = 0; j < rows[i].size(); j++) {
             candidates[rows[i]["id"].as<int>()].mindis = rows[i]["dis"].as<float>();
@@ -125,24 +133,36 @@ void filterByDistance(std::map<int, Range>& ranges, int number) {
     }
 }
 
-int main() {
+int main(int argc, char** argv) {
+    int opt;
+    while ((opt = getopt(argc, argv, "t:1:2:")) != -1) {
+        switch (opt) {
+            case 't': target = std::stoi(optarg); break;
+            case '1': table1 = optarg; break;
+            case '2': table2 = optarg; break;
+            default: std::cerr << "Usage: " << argv[0] << " -t <target> -1 <table1> -2 <table2>" << std::endl; return 1;
+        }
+    }
+
     pqxx::connection c(buildstr);
     pqxx::work w(c);
     auto beforeTime = std::chrono::steady_clock::now();
+
     pqxx::result rows = w.exec(buildQueryMbbSql(target));
     std::map<int, Range> candidates;
     parseDistanceResult(rows, candidates);
     filterByDistance(candidates, number);
-    rows = w.exec(buildQueryOriginSql(target, mapKeysToVector(candidates)));
-    parseOriginResult(rows, candidates);
-    filterByDistance(candidates, result, distance);
-    if (candidates.empty()) {
-        for (int i = 0; i < result.size(); i++) {
-            std::cout << result[i] << std::endl;
-        }
-    }
     auto afterTime = std::chrono::steady_clock::now();
     double duration_millsecond = std::chrono::duration<double, std::milli>(afterTime - beforeTime).count();
-	std::cout << duration_millsecond << "ms" << std::endl;
+    std::cout << target << " " << duration_millsecond << " ";
+    rows = w.exec(buildQueryOriginSql(target, mapKeysToVector(candidates)));
+    parseOriginResult(rows, candidates);
+    filterByDistance(candidates, number);
+    // for (auto item : candidates) {
+    //     std::cout << item.first << std::endl;
+    // }
+    auto afterTime2 = std::chrono::steady_clock::now();
+    duration_millsecond = std::chrono::duration<double, std::milli>(afterTime2 - afterTime).count();
+    std::cout << target << duration_millsecond << " ";
     return 0;
 }
