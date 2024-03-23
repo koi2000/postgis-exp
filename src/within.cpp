@@ -147,6 +147,7 @@ int main(int argc, char** argv) {
     auto afterTime = std::chrono::steady_clock::now();
     double duration_millsecond = std::chrono::duration<double, std::milli>(afterTime - beforeTime).count();
     std::cout << target << " " << duration_millsecond << " ";
+    std::cout<< "lod ";
     for (int lod = 20; lod <= 100; lod += 20) {
         rows = w.exec(buildQueryHausdorffSql(lod, target));
         std::pair<float, float> targetHausdorff =
@@ -155,7 +156,7 @@ int main(int argc, char** argv) {
         parseLodDistanceResult(rows, candidates, targetHausdorff);
         filterByDistance(candidates, result, distance);
         if (candidates.empty()) {
-            // std::cout << lod << std::endl;
+            std::cout << lod << " ";
             // for (int i = 0; i < result.size(); i++) {
             //     std::cout << result[i] << std::endl;
             // }

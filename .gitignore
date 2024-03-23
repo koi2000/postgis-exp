@@ -5,5 +5,5 @@
 /Debug
 .vs
 /buffers
-*.log
-res.log
+# *.log
+# res.log

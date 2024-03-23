@@ -19,7 +19,7 @@ int target = 3;
 int number = 3;
 std::string table1 = "nuclei";
 std::string table2 = "nuclei";
-int distance = 100;
+int distance = 300;
 
 class Range {
   public:
