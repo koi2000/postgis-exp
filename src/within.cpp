@@ -18,6 +18,7 @@ int distance = 50;
 int target = 1;
 std::string table1 = "nuclei";
 std::string table2 = "nuclei";
+std::vector<int> candidateNumber;
 
 class Range {
   public:
@@ -144,10 +145,13 @@ int main(int argc, char** argv) {
     if (candidates.empty()) {
         exit(0);
     }
+
+    candidateNumber.push_back(candidates.size());
+
     auto afterTime = std::chrono::steady_clock::now();
     double duration_millsecond = std::chrono::duration<double, std::milli>(afterTime - beforeTime).count();
     std::cout << target << " " << duration_millsecond << " ";
-    std::cout<< "lod ";
+    std::cout << "lod ";
     for (int lod = 20; lod <= 100; lod += 20) {
         rows = w.exec(buildQueryHausdorffSql(lod, target));
         std::pair<float, float> targetHausdorff =
@@ -155,6 +159,7 @@ int main(int argc, char** argv) {
         rows = w.exec(buildQueryLodSql(lod, target, mapKeysToVector(candidates)));
         parseLodDistanceResult(rows, candidates, targetHausdorff);
         filterByDistance(candidates, result, distance);
+        candidateNumber.push_back(candidates.size());
         if (candidates.empty()) {
             std::cout << lod << " ";
             // for (int i = 0; i < result.size(); i++) {
@@ -166,5 +171,11 @@ int main(int argc, char** argv) {
     auto afterTime2 = std::chrono::steady_clock::now();
     duration_millsecond = std::chrono::duration<double, std::milli>(afterTime2 - afterTime).count();
     std::cout << duration_millsecond << std::endl;
+
+    for (int i = 0; i < candidateNumber.size(); i++) {
+        std::cout << candidateNumber[i] << " ";
+    }
+    std::cout << "\n";
+
     return 0;
 }

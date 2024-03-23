@@ -14,11 +14,13 @@ std::string buildstr = "hostaddr=" + host + " dbname=" + dbname + " user=" + use
  * 如何实现NN查询
  * 先根据mbb找到前100个，然后从最低的lod开始找，期间要涉及到排序，如果
  */
-int target = 3;
+int target = 1;
 int number = 3;
 std::string table1 = "nuclei";
 std::string table2 = "nuclei";
 int distance = 300;
+std::vector<int> result;
+std::vector<int> candidateNumber;
 
 class Range {
   public:
@@ -117,12 +119,34 @@ std::vector<Range> mapValuesToVector(const std::map<int, Range>& myMap) {
 /**
  * 过滤掉不符合条件的distance，符合条件的直接假如，待确定的留在其中
  */
-void filterByDistance(std::map<int, Range>& ranges, int number) {
+void filterByDistance(std::map<int, Range>& ranges) {
     std::set<int> removable;
     std::set<float> window;
     std::vector<Range> rarr = mapValuesToVector(ranges);
     std::sort(rarr.begin(), rarr.end(), [](Range a, Range b) { return a.maxdis < b.maxdis; });
-    for (int i = 0; i < number; i++) {
+    // std::sort(rarr.begin(), rarr.end(), [](Range a, Range b) { return a.mindis < b.mindis; });
+    // 如果有人的maxdis小于其他所有人的mindis，则说明可以直接确定下来
+    for (int i = 0; i < number - result.size(); i++) {
+        int flag = true;
+        for (int j = i + 1; j < rarr.size(); j++) {
+            if (rarr[i].maxdis > rarr[j].mindis) {
+                flag = false;
+                break;
+            }
+        }
+        if (flag) {
+            result.push_back(rarr[i].id);
+            removable.insert(rarr[i].id);
+        }
+    }
+    for (int id : removable) {
+        ranges.erase(id);
+    }
+    if (result.size() == number) {
+        return;
+    }
+    removable.clear();
+    for (int i = 0; i < number - result.size(); i++) {
         window.insert(rarr[i].maxdis);
     }
     for (int i = 0; i < rarr.size(); i++) {
@@ -158,6 +182,7 @@ int main(int argc, char** argv) {
     if (candidates.size() == number) {
         exit(0);
     }
+    candidateNumber.push_back(candidates.size());
 
     auto afterTime = std::chrono::steady_clock::now();
     double duration_millsecond = std::chrono::duration<double, std::milli>(afterTime - beforeTime).count();
@@ -169,10 +194,11 @@ int main(int argc, char** argv) {
             std::make_pair(rows[0]["hausdorff"].as<float>(), rows[0]["phausdorff"].as<float>());
         rows = w.exec(buildQueryLodSql(lod, target, mapKeysToVector(candidates)));
         parseLodDistanceResult(rows, candidates, targetHausdorff);
-        filterByDistance(candidates, number);
-        if (candidates.size() == number) {
-            // for (auto item : candidates) {
-            //     std::cout << item.first << std::endl;
+        filterByDistance(candidates);
+        candidateNumber.push_back(candidates.size());
+        if (result.size() == number) {
+            // for (auto item : result) {
+            //     std::cout << item << std::endl;
             // }
             break;
         }
@@ -180,5 +206,9 @@ int main(int argc, char** argv) {
     auto afterTime2 = std::chrono::steady_clock::now();
     duration_millsecond = std::chrono::duration<double, std::milli>(afterTime2 - afterTime).count();
     std::cout << duration_millsecond << std::endl;
+    for (int i = 0; i < candidateNumber.size(); i++) {
+        std::cout << candidateNumber[i] << " ";
+    }
+    std::cout << "\n";
     return 0;
 }

@@ -15,11 +15,11 @@ std::string buildstr = "hostaddr=" + host + " dbname=" + dbname + " user=" + use
  * 如何实现NN查询
  * 先根据mbb找到前100个，然后从最低的lod开始找，期间要涉及到排序，如果
  */
-int target = 3;
+int target = 1;
 int number = 3;
 std::string table1 = "nuclei";
 std::string table2 = "nuclei";
-int distance = 300;
+int distance = 100;
 
 class Range {
   public:
@@ -158,9 +158,9 @@ int main(int argc, char** argv) {
     rows = w.exec(buildQueryOriginSql(target, mapKeysToVector(candidates)));
     parseOriginResult(rows, candidates);
     filterByDistance(candidates, number);
-    // for (auto item : candidates) {
-    //     std::cout << item.first << std::endl;
-    // }
+    for (auto item : candidates) {
+        std::cout << item.first << std::endl;
+    }
     auto afterTime2 = std::chrono::steady_clock::now();
     duration_millsecond = std::chrono::duration<double, std::milli>(afterTime2 - afterTime).count();
     std::cout << target << duration_millsecond << " ";
