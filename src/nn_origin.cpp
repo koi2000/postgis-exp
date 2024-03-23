@@ -19,7 +19,7 @@ int target = 1;
 int number = 3;
 std::string table1 = "nuclei";
 std::string table2 = "nuclei";
-int distance = 100;
+int distance = 300;
 
 class Range {
   public:
@@ -158,11 +158,11 @@ int main(int argc, char** argv) {
     rows = w.exec(buildQueryOriginSql(target, mapKeysToVector(candidates)));
     parseOriginResult(rows, candidates);
     filterByDistance(candidates, number);
-    for (auto item : candidates) {
-        std::cout << item.first << std::endl;
-    }
+    // for (auto item : candidates) {
+    //     std::cout << item.first << std::endl;
+    // }
     auto afterTime2 = std::chrono::steady_clock::now();
     duration_millsecond = std::chrono::duration<double, std::milli>(afterTime2 - afterTime).count();
-    std::cout << target << duration_millsecond << " ";
+    std::cout << duration_millsecond << "\n";
     return 0;
 }

@@ -14,13 +14,14 @@ std::string buildstr = "hostaddr=" + host + " dbname=" + dbname + " user=" + use
  * 如何实现NN查询
  * 先根据mbb找到前100个，然后从最低的lod开始找，期间要涉及到排序，如果
  */
-int target = 1;
+int target = 89;
 int number = 3;
 std::string table1 = "nuclei";
 std::string table2 = "nuclei";
 int distance = 300;
 std::vector<int> result;
 std::vector<int> candidateNumber;
+std::vector<double> iterTimes;
 
 class Range {
   public:
@@ -60,7 +61,7 @@ std::string buildIdList(const std::vector<int>& ids) {
  * 返回的是当前lod下的distance和hausdorff距离
  */
 std::string buildQueryLodSql(int lod, int id, std::vector<int> ids) {
-    char sql[2048];
+    char sql[4096];
     sprintf(sql,
             "SELECT b.id, ST_3DDistance(a.geom, b.geom) as dis, "
             "b.hausdorff, b.phausdorff FROM "
@@ -140,6 +141,13 @@ void filterByDistance(std::map<int, Range>& ranges) {
         }
     }
     for (int id : removable) {
+        for (auto it = rarr.begin(); it != rarr.end();) {
+            if (id == (*it).id) {
+                it = rarr.erase(it);
+            } else {
+                it++;
+            }
+        }
         ranges.erase(id);
     }
     if (result.size() == number) {
@@ -182,13 +190,14 @@ int main(int argc, char** argv) {
     if (candidates.size() == number) {
         exit(0);
     }
+    std::string log = std::to_string(target) + " ";
     candidateNumber.push_back(candidates.size());
-
-    auto afterTime = std::chrono::steady_clock::now();
-    double duration_millsecond = std::chrono::duration<double, std::milli>(afterTime - beforeTime).count();
-    std::cout << target << " " << duration_millsecond << " ";
-
+    auto mbbTime = std::chrono::steady_clock::now();
+    double duration_millsecond = std::chrono::duration<double, std::milli>(mbbTime - beforeTime).count();
+    log = log + std::to_string(duration_millsecond) + " ";
     for (int lod = 20; lod <= 100; lod += 20) {
+        auto iterSt = std::chrono::steady_clock::now();
+
         rows = w.exec(buildQueryHausdorffSql(lod, target));
         std::pair<float, float> targetHausdorff =
             std::make_pair(rows[0]["hausdorff"].as<float>(), rows[0]["phausdorff"].as<float>());
@@ -196,19 +205,35 @@ int main(int argc, char** argv) {
         parseLodDistanceResult(rows, candidates, targetHausdorff);
         filterByDistance(candidates);
         candidateNumber.push_back(candidates.size());
+        if (candidates.size() == number - result.size()) {
+            for (auto it : candidates) {
+                result.push_back(it.first);
+            }
+        }
+        auto iterEd = std::chrono::steady_clock::now();
+        double ts = std::chrono::duration<double, std::milli>(iterEd - iterSt).count();
+        iterTimes.push_back(ts);
         if (result.size() == number) {
-            // for (auto item : result) {
-            //     std::cout << item << std::endl;
-            // }
             break;
         }
     }
-    auto afterTime2 = std::chrono::steady_clock::now();
-    duration_millsecond = std::chrono::duration<double, std::milli>(afterTime2 - afterTime).count();
-    std::cout << duration_millsecond << std::endl;
-    for (int i = 0; i < candidateNumber.size(); i++) {
-        std::cout << candidateNumber[i] << " ";
+    for (int i = 0; i < 5; i++) {
+        if (i < candidateNumber.size()) {
+            log = log + std::to_string(candidateNumber[i]) + " ";
+        } else {
+            log = log + std::to_string(0) + " ";
+        }
     }
-    std::cout << "\n";
+    for (int i = 0; i < 5; i++) {
+        if (i < iterTimes.size()) {
+            log = log + std::to_string(iterTimes[i]) + " ";
+        } else {
+            log = log + std::to_string(0) + " ";
+        }
+    }
+    auto endTime = std::chrono::steady_clock::now();
+    double allTime = std::chrono::duration<double, std::milli>(endTime - beforeTime).count();
+    log += std::to_string(allTime);
+    std::cout << log << std::endl;
     return 0;
 }
