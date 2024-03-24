@@ -32,7 +32,7 @@ class Range {
 std::string buildstr = "hostaddr=" + host + " dbname=" + dbname + " user=" + user + " password=" + password;
 
 std::string buildQueryMbbSql(int id) {
-    char sql[512];
+    char sql[4096];
     sprintf(sql,
             "SELECT b.id as id FROM %s_box a, %s_box b WHERE a.id <> b.id AND a.id = %d AND ST_3DDWithin(a.geom, "
             "b.geom, %d);",
@@ -55,7 +55,7 @@ std::string buildIdList(const std::vector<int>& ids) {
  * 返回的是当前lod下的distance和hausdorff距离
  */
 std::string buildQueryOriginSql(int id, std::vector<int> ids) {
-    char sql[512];
+    char sql[4096];
     sprintf(sql,
             "SELECT b.id, ST_3DDistance(a.geom, b.geom) as dis FROM "
             "%s_100 a, %s_100 b WHERE a.id <> b.id AND a.id = '%d' AND b.id IN (%s);",
@@ -64,7 +64,7 @@ std::string buildQueryOriginSql(int id, std::vector<int> ids) {
 }
 
 std::string buildQueryHausdorffSql(int lod, int id) {
-    char sql[512];
+    char sql[4096];
     sprintf(sql,
             "SELECT a.hausdorff, a.phausdorff "
             "FROM %s_%d a "

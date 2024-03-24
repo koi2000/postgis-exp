@@ -14,10 +14,10 @@ std::string buildstr = "hostaddr=" + host + " dbname=" + dbname + " user=" + use
  * 如何实现NN查询
  * 先根据mbb找到前100个，然后从最低的lod开始找，期间要涉及到排序，如果
  */
-int target = 89;
+int target = 6853;
 int number = 3;
 std::string table1 = "nuclei";
-std::string table2 = "nuclei";
+std::string table2 = "vessel";
 int distance = 300;
 std::vector<int> result;
 std::vector<int> candidateNumber;
@@ -38,7 +38,7 @@ class Range {
  * 找出来前100最小距离最小的
  */
 std::string buildQueryMbbSql(int id) {
-    char sql[512];
+    char sql[4096];
     sprintf(sql,
             "SELECT b.id as id FROM %s_box a, %s_box b WHERE a.id <> b.id AND a.id = %d AND ST_3DDWithin(a.geom, "
             "b.geom, %d);",
@@ -71,7 +71,7 @@ std::string buildQueryLodSql(int lod, int id, std::vector<int> ids) {
 }
 
 std::string buildQueryHausdorffSql(int lod, int id) {
-    char sql[512];
+    char sql[4096];
     sprintf(sql,
             "SELECT a.hausdorff, a.phausdorff "
             "FROM %s_%d a "
@@ -187,8 +187,11 @@ int main(int argc, char** argv) {
     parseDistanceResult(rows, candidates);
     // filterByDistance(candidates, number);
     // 当候选集维空的时候，说明已经确定了结果
-    if (candidates.size() == number) {
-        exit(0);
+    while (candidates.size() <= number) {
+        candidates.clear();
+        distance += 200;
+        pqxx::result rows = w.exec(buildQueryMbbSql(target));
+        parseDistanceResult(rows, candidates);
     }
     std::string log = std::to_string(target) + " ";
     candidateNumber.push_back(candidates.size());
@@ -205,7 +208,7 @@ int main(int argc, char** argv) {
         parseLodDistanceResult(rows, candidates, targetHausdorff);
         filterByDistance(candidates);
         candidateNumber.push_back(candidates.size());
-        if (candidates.size() == number - result.size()) {
+        if (candidates.size() <= number - result.size()) {
             for (auto it : candidates) {
                 result.push_back(it.first);
             }

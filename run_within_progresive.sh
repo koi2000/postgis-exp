@@ -1,6 +1,10 @@
 #!/bin/bash
 
-for ((i = 0; i <= 100; i++)); do
+for ((i = 0; i <= 9551; i++)); do
+    ./build/within -t $i -1 nuclei -2 nuclei
+done
+
+for ((i = 0; i <= 9551; i++)); do
     ./build/within -t $i -1 nuclei -2 vessel
 done
 

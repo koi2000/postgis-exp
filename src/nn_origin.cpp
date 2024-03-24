@@ -15,11 +15,11 @@ std::string buildstr = "hostaddr=" + host + " dbname=" + dbname + " user=" + use
  * 如何实现NN查询
  * 先根据mbb找到前100个，然后从最低的lod开始找，期间要涉及到排序，如果
  */
-int target = 1;
+int target = 929;
 int number = 3;
 std::string table1 = "nuclei";
 std::string table2 = "nuclei";
-int distance = 300;
+int distance = 100;
 
 class Range {
   public:
@@ -36,7 +36,7 @@ class Range {
  * 找出来前100最小距离最小的
  */
 std::string buildQueryMbbSql(int id) {
-    char sql[2048];
+    char sql[4096];
     sprintf(sql,
             "SELECT b.id as id FROM %s_box a, %s_box b WHERE a.id <> b.id AND a.id = %d AND ST_3DDWithin(a.geom, "
             "b.geom, %d);",
@@ -59,7 +59,7 @@ std::string buildIdList(const std::vector<int>& ids) {
  * 返回的是当前lod下的distance和hausdorff距离
  */
 std::string buildQueryOriginSql(int id, std::vector<int> ids) {
-    char sql[2048];
+    char sql[4096];
     sprintf(sql,
             "SELECT b.id, ST_3DDistance(a.geom, b.geom) as dis FROM "
             "%s_100 a, %s_100 b WHERE a.id <> b.id AND a.id = '%d' AND b.id IN (%s);",
@@ -152,6 +152,12 @@ int main(int argc, char** argv) {
     std::map<int, Range> candidates;
     parseDistanceResult(rows, candidates);
     filterByDistance(candidates, number);
+    while (candidates.size() <= number) {
+        candidates.clear();
+        distance += 200;
+        pqxx::result rows = w.exec(buildQueryMbbSql(target));
+        parseDistanceResult(rows, candidates);
+    }
     auto afterTime = std::chrono::steady_clock::now();
     double duration_millsecond = std::chrono::duration<double, std::milli>(afterTime - beforeTime).count();
     std::cout << target << " " << duration_millsecond << " ";
