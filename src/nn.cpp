@@ -18,7 +18,7 @@ int target = 6853;
 int N = 10;
 int number = 3;
 std::string table1 = "nuclei";
-std::string table2 = "vessel";
+std::string table2 = "nuclei";
 int distance = 100;
 std::vector<int> result;
 std::vector<int> candidateNumber;
@@ -194,6 +194,8 @@ int main(int argc, char** argv) {
     std::vector<double> avgTime(5, 0);
     for (int i = 0; i < N; i++) {
         target = i;
+        result.clear();
+        result.shrink_to_fit();
         candidateNumber.clear();
         candidateNumber.shrink_to_fit();
         iterTimes.clear();
@@ -204,7 +206,7 @@ int main(int argc, char** argv) {
         parseDistanceResult(rows, candidates);
         filterByDistance(candidates);
         std::string log = std::to_string(target) + " ";
-        
+
         auto mbbTime = std::chrono::steady_clock::now();
         double duration_millsecond = std::chrono::duration<double, std::milli>(mbbTime - beforeTime).count();
         log = log + std::to_string(duration_millsecond) + " ";
@@ -226,6 +228,10 @@ int main(int argc, char** argv) {
             double ts = std::chrono::duration<double, std::milli>(iterEd - iterSt).count();
             iterTimes.push_back(ts);
             if (result.size() == number) {
+                // for (int i = 0; i < result.size(); i++) {
+                //     std::cout << result[i] << " ";
+                // }
+                // std::cout << "\n";
                 break;
             }
         }
