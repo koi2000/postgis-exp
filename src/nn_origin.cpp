@@ -15,10 +15,11 @@ std::string buildstr = "hostaddr=" + host + " dbname=" + dbname + " user=" + use
  * 如何实现NN查询
  * 先根据mbb找到前100个，然后从最低的lod开始找，期间要涉及到排序，如果
  */
+int N = 1;
 int target = 929;
 int number = 3;
 std::string table1 = "nuclei";
-std::string table2 = "nuclei";
+std::string table2 = "vessel";
 int distance = 100;
 
 class Range {
@@ -32,18 +33,24 @@ class Range {
     Range(float mindis_, float maxdis_) : mindis(mindis_), maxdis(maxdis_) {}
 };
 
-/**
- * 找出来前100最小距离最小的
- */
 std::string buildQueryMbbSql(int id) {
     char sql[4096];
-    sprintf(sql,
-            "SELECT b.id as id FROM %s_box a, %s_box b WHERE a.id <> b.id AND a.id = %d AND ST_3DDWithin(a.geom, "
-            "b.geom, %d);",
-            table1.c_str(), table2.c_str(), id, distance);
+    if (table2 == "vessel") {
+        sprintf(sql,
+                "SELECT b.id as id , ST_3DDistance(a.geom, b.geom) as mindis, ST_3DMAXDistance(a.geom, b.geom) as "
+                "maxdis FROM "
+                "%s_box a, %s_box b WHERE a.id <> b.id AND a.id = %d;",
+                table1.c_str(), table2.c_str(), id, distance);
+    } else {
+        sprintf(sql,
+                "SELECT b.id as id, ST_3DDistance(a.geom, b.geom) as mindis, ST_3DMAXDistance(a.geom, b.geom) as "
+                "maxdis FROM "
+                "%s_box a, %s_box b WHERE a.id <> b.id AND a.id = %d AND ST_3DDWithin(a.geom, "
+                "b.geom, %d);",
+                table1.c_str(), table2.c_str(), id, distance);
+    }
     return std::string(sql);
 }
-
 std::string buildIdList(const std::vector<int>& ids) {
     std::string idList;
     for (size_t i = 0; i < ids.size(); ++i) {
@@ -72,6 +79,8 @@ void parseDistanceResult(pqxx::result& rows, std::map<int, Range>& candidates) {
     for (int i = 0; i < rows.size(); i++) {
         for (int j = 0; j < rows[i].size(); j++) {
             candidates[rows[i]["id"].as<int>()] = Range(rows[i]["id"].as<int>());
+            candidates[rows[i]["id"].as<int>()].mindis = rows[i]["mindis"].as<float>();
+            candidates[rows[i]["id"].as<int>()].maxdis = rows[i]["maxdis"].as<float>();
         }
     }
 }
@@ -135,9 +144,9 @@ void filterByDistance(std::map<int, Range>& ranges, int number) {
 
 int main(int argc, char** argv) {
     int opt;
-    while ((opt = getopt(argc, argv, "t:1:2:")) != -1) {
+    while ((opt = getopt(argc, argv, "n:1:2:")) != -1) {
         switch (opt) {
-            case 't': target = std::stoi(optarg); break;
+            case 'n': N = std::stoi(optarg); break;
             case '1': table1 = optarg; break;
             case '2': table2 = optarg; break;
             default: std::cerr << "Usage: " << argv[0] << " -t <target> -1 <table1> -2 <table2>" << std::endl; return 1;
@@ -146,29 +155,29 @@ int main(int argc, char** argv) {
 
     pqxx::connection c(buildstr);
     pqxx::work w(c);
-    auto beforeTime = std::chrono::steady_clock::now();
-
-    pqxx::result rows = w.exec(buildQueryMbbSql(target));
-    std::map<int, Range> candidates;
-    parseDistanceResult(rows, candidates);
-    filterByDistance(candidates, number);
-    while (candidates.size() <= number) {
-        candidates.clear();
-        distance += 200;
+    std::vector<std::string> logs;
+    logs.reserve(N);
+    for (int i = 0; i < N; i++) {
+        std::string log = "";
+        target = i;
+        auto beforeTime = std::chrono::steady_clock::now();
         pqxx::result rows = w.exec(buildQueryMbbSql(target));
+        std::map<int, Range> candidates;
         parseDistanceResult(rows, candidates);
+        filterByDistance(candidates, number);
+        auto afterTime = std::chrono::steady_clock::now();
+        double duration_millsecond = std::chrono::duration<double, std::milli>(afterTime - beforeTime).count();
+        log = log + std::to_string(target) + " " + std::to_string(duration_millsecond);
+        rows = w.exec(buildQueryOriginSql(target, mapKeysToVector(candidates)));
+        parseOriginResult(rows, candidates);
+        filterByDistance(candidates, number);
+        auto afterTime2 = std::chrono::steady_clock::now();
+        duration_millsecond = std::chrono::duration<double, std::milli>(afterTime2 - afterTime).count();
+        log = log + " " + std::to_string(duration_millsecond);
+        logs.push_back(log);
     }
-    auto afterTime = std::chrono::steady_clock::now();
-    double duration_millsecond = std::chrono::duration<double, std::milli>(afterTime - beforeTime).count();
-    std::cout << target << " " << duration_millsecond << " ";
-    rows = w.exec(buildQueryOriginSql(target, mapKeysToVector(candidates)));
-    parseOriginResult(rows, candidates);
-    filterByDistance(candidates, number);
-    // for (auto item : candidates) {
-    //     std::cout << item.first << std::endl;
-    // }
-    auto afterTime2 = std::chrono::steady_clock::now();
-    duration_millsecond = std::chrono::duration<double, std::milli>(afterTime2 - afterTime).count();
-    std::cout << duration_millsecond << "\n";
+    for (int i = 0; i < logs.size(); i++) {
+        std::cout << logs[i] << std::endl;
+    }
     return 0;
 }

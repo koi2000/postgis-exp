@@ -15,10 +15,11 @@ std::string buildstr = "hostaddr=" + host + " dbname=" + dbname + " user=" + use
  * 先根据mbb找到前100个，然后从最低的lod开始找，期间要涉及到排序，如果
  */
 int target = 6853;
+int N = 10;
 int number = 3;
 std::string table1 = "nuclei";
 std::string table2 = "vessel";
-int distance = 300;
+int distance = 100;
 std::vector<int> result;
 std::vector<int> candidateNumber;
 std::vector<double> iterTimes;
@@ -34,15 +35,22 @@ class Range {
     Range(float mindis_, float maxdis_) : mindis(mindis_), maxdis(maxdis_) {}
 };
 
-/**
- * 找出来前100最小距离最小的
- */
 std::string buildQueryMbbSql(int id) {
     char sql[4096];
-    sprintf(sql,
-            "SELECT b.id as id FROM %s_box a, %s_box b WHERE a.id <> b.id AND a.id = %d AND ST_3DDWithin(a.geom, "
-            "b.geom, %d);",
-            table1.c_str(), table2.c_str(), id, distance);
+    if (table2 == "vessel") {
+        sprintf(sql,
+                "SELECT b.id as id , ST_3DDistance(a.geom, b.geom) as mindis, ST_3DMAXDistance(a.geom, b.geom) as "
+                "maxdis FROM "
+                "%s_box a, %s_box b WHERE a.id <> b.id AND a.id = %d;",
+                table1.c_str(), table2.c_str(), id, distance);
+    } else {
+        sprintf(sql,
+                "SELECT b.id as id, ST_3DDistance(a.geom, b.geom) as mindis, ST_3DMAXDistance(a.geom, b.geom) as "
+                "maxdis FROM "
+                "%s_box a, %s_box b WHERE a.id <> b.id AND a.id = %d AND ST_3DDWithin(a.geom, "
+                "b.geom, %d);",
+                table1.c_str(), table2.c_str(), id, distance);
+    }
     return std::string(sql);
 }
 
@@ -84,7 +92,8 @@ std::string buildQueryHausdorffSql(int lod, int id) {
 void parseDistanceResult(pqxx::result& rows, std::map<int, Range>& candidates) {
     for (int i = 0; i < rows.size(); i++) {
         for (int j = 0; j < rows[i].size(); j++) {
-            candidates[rows[i]["id"].as<int>()] = Range(rows[i]["id"].as<int>());
+            candidates[rows[i]["id"].as<int>()] =
+                Range(rows[i]["id"].as<int>(), rows[i]["mindis"].as<float>(), rows[i]["maxdis"].as<float>());
         }
     }
 }
@@ -169,74 +178,88 @@ void filterByDistance(std::map<int, Range>& ranges) {
 
 int main(int argc, char** argv) {
     int opt;
-    while ((opt = getopt(argc, argv, "t:1:2:")) != -1) {
+    while ((opt = getopt(argc, argv, "n:1:2:")) != -1) {
         switch (opt) {
-            case 't': target = std::stoi(optarg); break;
+            case 'n': N = std::stoi(optarg); break;
             case '1': table1 = optarg; break;
             case '2': table2 = optarg; break;
             default: std::cerr << "Usage: " << argv[0] << " -t <target> -1 <table1> -2 <table2>" << std::endl; return 1;
         }
     }
-
     pqxx::connection c(buildstr);
     pqxx::work w(c);
-    auto beforeTime = std::chrono::steady_clock::now();
-
-    pqxx::result rows = w.exec(buildQueryMbbSql(target));
-    std::map<int, Range> candidates;
-    parseDistanceResult(rows, candidates);
-    // filterByDistance(candidates, number);
-    // 当候选集维空的时候，说明已经确定了结果
-    while (candidates.size() <= number) {
-        candidates.clear();
-        distance += 200;
+    std::vector<std::string> logs;
+    logs.reserve(N);
+    std::vector<int> avgNumber(5, 0);
+    std::vector<double> avgTime(5, 0);
+    for (int i = 0; i < N; i++) {
+        target = i;
+        candidateNumber.clear();
+        candidateNumber.shrink_to_fit();
+        iterTimes.clear();
+        iterTimes.shrink_to_fit();
+        auto beforeTime = std::chrono::steady_clock::now();
         pqxx::result rows = w.exec(buildQueryMbbSql(target));
+        std::map<int, Range> candidates;
         parseDistanceResult(rows, candidates);
-    }
-    std::string log = std::to_string(target) + " ";
-    candidateNumber.push_back(candidates.size());
-    auto mbbTime = std::chrono::steady_clock::now();
-    double duration_millsecond = std::chrono::duration<double, std::milli>(mbbTime - beforeTime).count();
-    log = log + std::to_string(duration_millsecond) + " ";
-    for (int lod = 20; lod <= 100; lod += 20) {
-        auto iterSt = std::chrono::steady_clock::now();
-
-        rows = w.exec(buildQueryHausdorffSql(lod, target));
-        std::pair<float, float> targetHausdorff =
-            std::make_pair(rows[0]["hausdorff"].as<float>(), rows[0]["phausdorff"].as<float>());
-        rows = w.exec(buildQueryLodSql(lod, target, mapKeysToVector(candidates)));
-        parseLodDistanceResult(rows, candidates, targetHausdorff);
         filterByDistance(candidates);
-        candidateNumber.push_back(candidates.size());
-        if (candidates.size() <= number - result.size()) {
-            for (auto it : candidates) {
-                result.push_back(it.first);
+        std::string log = std::to_string(target) + " ";
+        
+        auto mbbTime = std::chrono::steady_clock::now();
+        double duration_millsecond = std::chrono::duration<double, std::milli>(mbbTime - beforeTime).count();
+        log = log + std::to_string(duration_millsecond) + " ";
+        for (int lod = 20; lod <= 100; lod += 20) {
+            candidateNumber.push_back(candidates.size());
+            auto iterSt = std::chrono::steady_clock::now();
+            rows = w.exec(buildQueryHausdorffSql(lod, target));
+            std::pair<float, float> targetHausdorff =
+                std::make_pair(rows[0]["hausdorff"].as<float>(), rows[0]["phausdorff"].as<float>());
+            rows = w.exec(buildQueryLodSql(lod, target, mapKeysToVector(candidates)));
+            parseLodDistanceResult(rows, candidates, targetHausdorff);
+            filterByDistance(candidates);
+            if (candidates.size() <= number - result.size()) {
+                for (auto it : candidates) {
+                    result.push_back(it.first);
+                }
+            }
+            auto iterEd = std::chrono::steady_clock::now();
+            double ts = std::chrono::duration<double, std::milli>(iterEd - iterSt).count();
+            iterTimes.push_back(ts);
+            if (result.size() == number) {
+                break;
             }
         }
-        auto iterEd = std::chrono::steady_clock::now();
-        double ts = std::chrono::duration<double, std::milli>(iterEd - iterSt).count();
-        iterTimes.push_back(ts);
-        if (result.size() == number) {
-            break;
+        for (int i = 0; i < 5; i++) {
+            if (i < candidateNumber.size()) {
+                log = log + std::to_string(candidateNumber[i]) + " ";
+                avgNumber[i] += candidateNumber[i];
+            } else {
+                log = log + std::to_string(0) + " ";
+            }
         }
-    }
-    for (int i = 0; i < 5; i++) {
-        if (i < candidateNumber.size()) {
-            log = log + std::to_string(candidateNumber[i]) + " ";
-        } else {
-            log = log + std::to_string(0) + " ";
+        for (int i = 0; i < 5; i++) {
+            if (i < iterTimes.size()) {
+                log = log + std::to_string(iterTimes[i]) + " ";
+                avgTime[i] += iterTimes[i];
+            } else {
+                log = log + std::to_string(0) + " ";
+            }
         }
+        auto endTime = std::chrono::steady_clock::now();
+        double allTime = std::chrono::duration<double, std::milli>(endTime - beforeTime).count();
+        log += std::to_string(allTime);
+        logs.push_back(log);
     }
-    for (int i = 0; i < 5; i++) {
-        if (i < iterTimes.size()) {
-            log = log + std::to_string(iterTimes[i]) + " ";
-        } else {
-            log = log + std::to_string(0) + " ";
-        }
+    for (int i = 0; i < logs.size(); i++) {
+        std::cout << logs[i] << std::endl;
     }
-    auto endTime = std::chrono::steady_clock::now();
-    double allTime = std::chrono::duration<double, std::milli>(endTime - beforeTime).count();
-    log += std::to_string(allTime);
-    std::cout << log << std::endl;
+    for (int i = 0; i < avgNumber.size(); i++) {
+        std::cout << (double)avgNumber[i] / (double)N << " ";
+    }
+    std::cout << "\n";
+    for (int i = 0; i < avgTime.size(); i++) {
+        std::cout << avgTime[i] / (double)N << " ";
+    }
+    std::cout << "\n";
     return 0;
 }

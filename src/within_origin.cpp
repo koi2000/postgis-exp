@@ -14,10 +14,11 @@
  * dis(a,b) >= dis(a',b') - h(a,a') - h(b,b')
  * dis(a,b) <= dis(a',b') + h(a,a') + h(b,b')
  */
+int N = 10;
 int distance = 50;
 int target = 1;
 std::string table1 = "nuclei";
-std::string table2 = "nuclei";
+std::string table2 = "vessel";
 
 class Range {
   public:
@@ -118,9 +119,9 @@ std::vector<int> mapKeysToVector(const std::map<int, Range>& myMap) {
 
 int main(int argc, char** argv) {
     int opt;
-    while ((opt = getopt(argc, argv, "t:1:2:")) != -1) {
+    while ((opt = getopt(argc, argv, "n:1:2:")) != -1) {
         switch (opt) {
-            case 't': target = std::stoi(optarg); break;
+            case 'n': N = std::stoi(optarg); break;
             case '1': table1 = optarg; break;
             case '2': table2 = optarg; break;
             default: std::cerr << "Usage: " << argv[0] << " -t <target> -1 <table1> -2 <table2>" << std::endl; return 1;
@@ -129,31 +130,35 @@ int main(int argc, char** argv) {
 
     pqxx::connection c(buildstr);
     pqxx::work w(c);
+    std::vector<std::string> logs;
+    logs.reserve(N);
+    for (int i = 0; i < N; i++) {
+        target = i;
+        std::string log = "";
+        auto beforeTime = std::chrono::steady_clock::now();
+        pqxx::result rows = w.exec(buildQueryMbbSql(target));
+        std::map<int, Range> candidates;
+        parseDistanceResult(rows, candidates);
+        std::vector<int> result;
+        auto afterTime = std::chrono::steady_clock::now();
+        double duration_millsecond = std::chrono::duration<double, std::milli>(afterTime - beforeTime).count();
+        log = log + std::to_string(target) + " " + std::to_string(duration_millsecond);
 
-    auto beforeTime = std::chrono::steady_clock::now();
-    pqxx::result rows = w.exec(buildQueryMbbSql(target));
-    std::map<int, Range> candidates;
-    parseDistanceResult(rows, candidates);
-    std::vector<int> result;
-    // filterByDistance(candidates, result, distance);
-    // 当候选集维空的时候，说明已经确定了结果
-    if (candidates.empty()) {
-        exit(0);
+        if (candidates.empty()) {
+            log = log + " " + std::to_string(0);
+            logs.push_back(log);
+            continue;
+        }
+        rows = w.exec(buildQueryOriginSql(target, mapKeysToVector(candidates)));
+        parseOriginResult(rows, candidates);
+        filterByDistance(candidates, result, distance);
+        auto afterTime2 = std::chrono::steady_clock::now();
+        duration_millsecond = std::chrono::duration<double, std::milli>(afterTime2 - afterTime).count();
+        log = log + " " + std::to_string(duration_millsecond);
+        logs.push_back(log);
     }
-    auto afterTime = std::chrono::steady_clock::now();
-    double duration_millsecond = std::chrono::duration<double, std::milli>(afterTime - beforeTime).count();
-    std::cout << target << " " << duration_millsecond << " ";
-
-    rows = w.exec(buildQueryOriginSql(target, mapKeysToVector(candidates)));
-    parseOriginResult(rows, candidates);
-    filterByDistance(candidates, result, distance);
-    // if (candidates.empty()) {
-    //     for (int i = 0; i < result.size(); i++) {
-    //         std::cout << result[i] << std::endl;
-    //     }
-    // }
-    auto afterTime2 = std::chrono::steady_clock::now();
-    duration_millsecond = std::chrono::duration<double, std::milli>(afterTime2 - afterTime).count();
-    std::cout << duration_millsecond << std::endl;
+    for (int i = 0; i < logs.size(); i++) {
+        std::cout << logs[i] << std::endl;
+    }
     return 0;
 }
