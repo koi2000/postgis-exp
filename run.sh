@@ -16,12 +16,12 @@ else
     exit 1
 fi
 
-# bash run.sh 100 progressive within nuclei
-# bash run.sh 100 all within nuclei
-# bash run.sh 100 progressive within vessel
-# bash run.sh 100 all within vessel
+# bash run.sh 9551 progressive within nuclei
+# bash run.sh 9551 all within nuclei
+# bash run.sh 9551 progressive within vessel
+# bash run.sh 9551 all within vessel
 
-# bash run.sh 100 progressive nn nuclei
-# bash run.sh 100 all nn nuclei
-# bash run.sh 100 progressive nn vessel
-# bash run.sh 100 all nn vessel
+# bash run.sh 9551 progressive nn nuclei
+# bash run.sh 9551 all nn nuclei
+# bash run.sh 9551 progressive nn vessel
+# bash run.sh 9551 all nn vessel
