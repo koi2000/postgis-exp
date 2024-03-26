@@ -21,6 +21,7 @@ std::string table1 = "nuclei";
 std::string table2 = "nuclei";
 std::vector<int> candidateNumber;
 std::vector<double> iterTimes;
+int sampleRate = 1;
 
 class Range {
   public:

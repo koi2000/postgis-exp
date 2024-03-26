@@ -19,6 +19,7 @@ int distance = 50;
 int target = 1;
 std::string table1 = "nuclei";
 std::string table2 = "vessel";
+int sampleRate = 1;
 
 class Range {
   public:

@@ -21,6 +21,7 @@ int number = 3;
 std::string table1 = "nuclei";
 std::string table2 = "vessel";
 int distance = 100;
+int sampleRate = 10;
 
 class Range {
   public:
@@ -157,7 +158,7 @@ int main(int argc, char** argv) {
     pqxx::work w(c);
     std::vector<std::string> logs;
     logs.reserve(N);
-    for (int i = 0; i < N; i++) {
+    for (int i = 0; i < N; i += sampleRate) {
         std::string log = "";
         target = i;
         auto beforeTime = std::chrono::steady_clock::now();
