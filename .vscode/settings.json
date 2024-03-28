@@ -93,6 +93,9 @@
         "semaphore": "cpp",
         "stop_token": "cpp",
         "pqxx": "cpp",
-        "connection": "cpp"
+        "connection": "cpp",
+        "csignal": "cpp",
+        "charconv": "cpp",
+        "filesystem": "cpp"
     }
 }
